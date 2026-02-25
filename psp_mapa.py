@@ -169,23 +169,12 @@ def load_data():
 
     # ── GPS dekódování (formát PSP: GG.AABBCCC = stupně.minutyvteřinytisíciny)
     def parse_gps(val):
+        # Souřadnice v pkgps.unl jsou přímo v desetinných stupních (WGS84)
         val = str(val).strip()
         if not val:
             return float("nan")
         try:
-            f = float(val)
-            if 48.0 <= f <= 51.5 or 12.0 <= f <= 18.9:
-                return f
-            if "." in val:
-                deg_s, frac_s = val.split(".", 1)
-            else:
-                deg_s, frac_s = val, "0000000"
-            deg  = int(deg_s)
-            frac = frac_s.ljust(7, "0")
-            mins = int(frac[0:2])
-            secs = int(frac[2:4])
-            msec = int(frac[4:7])
-            return deg + mins / 60.0 + secs / 3600.0 + msec / 3600000.0
+            return float(val)
         except Exception:
             return float("nan")
 
@@ -514,7 +503,6 @@ if not df.empty:
     tabulka.columns = ["Poslanec", "Strana", "Adresa kanceláře", "E-mail"]
     if "vzdalenost_km" in df.columns:
         tabulka.insert(2, "km", df["vzdalenost_km"].round(1))
-        tabulka.insert(3, "typ", df.get("vzdal_typ", "✈️"))
 
     st.dataframe(
         tabulka,
