@@ -74,7 +74,7 @@ def load_data():
         "narozeni", "pohlavi", "zmena", "umrti",
     ])
     pkgps = read_unl("pkgps.unl", [
-        "id_poslanec", "adresa_gps", "sirka", "delka",
+        "id_poslanec", "sirka", "delka", "adresa_gps",
     ])
     # pkancelar.unl – samostatná tabulka s kontakty regionálních kanceláří
     pkancelar = read_unl("pkancelar.unl", [
@@ -264,14 +264,15 @@ def load_data():
     n_tel   = (result["telefon_k"].str.len() > 0).sum()
     n_email = (result["email_k"].str.len() > 0).sum()
 
+    # Ukázka raw GPS hodnot pro debug
+    gps_sample = pkgps[["id_poslanec","sirka","delka","lat","lon"]].head(10).to_dict("records")
+
     debug = {
         "zkratky":  sorted(result["zkratka_kand"].dropna().unique().tolist()),
         "nazvy":    sorted(result["nazev_kand"].dropna().unique().tolist()),
         "strany":   sorted(result["strana"].unique().tolist()),
         "radku":    len(result),
-        "s_telefonem": int(n_tel),
-        "s_emailem":   int(n_email),
-        "ukazka_kontaktu": result[["jmeno_plne","telefon_k","email_k","adresa"]].head(5).to_dict("records"),
+        "gps_sample": gps_sample,
     }
 
     return result.reset_index(drop=True), debug
@@ -518,3 +519,8 @@ if not df.empty:
     )
 else:
     st.info("Žádné kanceláře neodpovídají filtrům.")
+
+with st.expander("🔧 Debug GPS", expanded=False):
+    st.write("**Vzorové raw GPS hodnoty z pkgps.unl:**")
+    st.dataframe(debug_info.get("gps_sample", []))
+    st.write("Pokud lat/lon nesedí na ČR, je problém v parsování sirka/delka sloupců.")
