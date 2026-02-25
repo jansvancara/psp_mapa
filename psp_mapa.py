@@ -342,36 +342,6 @@ def psc_to_coords(psc: str):
     return None, None
 
 
-@st.cache_data(ttl=3600)
-def osrm_road_distances(src_lat: float, src_lon: float,
-                         dest_coords: list) -> list:
-    """
-    Spočítá vzdálenosti po silnici pomocí OSRM Table API (zdarma, bez klíče).
-    dest_coords: list of (lat, lon) tuples
-    Vrátí list vzdáleností v km (nebo None při chybě).
-    """
-    if not dest_coords:
-        return []
-
-    # OSRM Table API: první souřadnice = zdroj, ostatní = cíle
-    coords_str = f"{src_lon},{src_lat}"
-    for lat, lon in dest_coords:
-        coords_str += f";{lon},{lat}"
-
-    # sources=0 znamená vzdálenosti od prvního bodu ke všem ostatním
-    url = (f"https://router.project-osrm.org/table/v1/driving/{coords_str}"
-           f"?sources=0&annotations=distance")
-    try:
-        r = requests.get(url, headers={"User-Agent": "PSP-kancelare-app/1.0"}, timeout=30)
-        data = r.json()
-        if data.get("code") == "Ok":
-            # distances[0] = vzdálenosti od zdroje ke každému cíli (v metrech)
-            distances_m = data["distances"][0][1:]  # přeskočit vzdálenost k sobě samému
-            return [d / 1000.0 if d is not None else None for d in distances_m]
-    except Exception:
-        pass
-    return [None] * len(dest_coords)
-
 
 # ─── HLAVNÍ UI ────────────────────────────────────────────────────────────────
 
@@ -392,9 +362,6 @@ with st.sidebar:
     st.subheader("📮 Vzdálenost od PSČ")
     psc_input = st.text_input("Vaše PSČ (např. 602 00)", placeholder="PSČ")
     max_km    = st.slider("Maximální vzdálenost (km)", 5, 300, 50, 5)
-    use_road  = st.toggle("🚗 Vzdálenost po silnici", value=False,
-                          help="Použije OSRM routing (může trvat déle). Bez zaškrtnutí se počítá vzdušná čára.")
-
     st.divider()
     st.subheader("🏳️ Stranická příslušnost")
 
@@ -432,36 +399,12 @@ if psc_input.strip():
     with st.spinner("Hledám souřadnice PSČ …"):
         user_lat, user_lon = psc_to_coords(psc_input)
     if user_lat:
-        # Nejprve vzdušná čára pro předfiltrování (rychlé)
         df["vzdalenost_km"] = df.apply(
             lambda r: haversine(user_lat, user_lon, r["lat"], r["lon"]), axis=1
         )
-
-        if use_road:
-            # Předfiltruj na 2× max_km vzdušnou čárou (eliminuje vzdálené body)
-            df_pre = df[df["vzdalenost_km"] <= max_km * 2].copy()
-            if not df_pre.empty:
-                with st.spinner(f"Počítám vzdálenosti po silnici pro {len(df_pre)} kanceláří …"):
-                    dest = list(zip(df_pre["lat"], df_pre["lon"]))
-                    road_km = osrm_road_distances(user_lat, user_lon, dest)
-                # Přiřaď silniční vzdálenosti; kde OSRM selhal, ponech vzdušnou čáru
-                df_pre["vzdalenost_km"] = [
-                    r if r is not None else h
-                    for r, h in zip(road_km, df_pre["vzdalenost_km"])
-                ]
-                df_pre["vzdal_typ"] = [
-                    "🚗" if r is not None else "✈️"
-                    for r in road_km
-                ]
-                df = df_pre[df_pre["vzdalenost_km"] <= max_km].copy()
-            else:
-                df = df_pre
-        else:
-            df["vzdal_typ"] = "✈️"
-            df = df[df["vzdalenost_km"] <= max_km].copy()
-
-        typ_label = "po silnici 🚗" if use_road else "vzdušnou čárou ✈️"
-        st.info(f"📍 PSČ **{psc_input.strip()}** nalezeno · zobrazuji **{len(df)}** kanceláří do **{max_km} km** {typ_label}")
+        df["vzdal_typ"] = "✈️"
+        df = df[df["vzdalenost_km"] <= max_km].copy()
+        st.info(f"📍 PSČ **{psc_input.strip()}** · zobrazuji **{len(df)}** kanceláří do **{max_km} km** ✈️")
     else:
         st.warning("PSČ nenalezeno nebo chyba geocódování.")
 
@@ -508,9 +451,8 @@ for _, row in df.iterrows():
                  f'<td><a href="tel:{tel}" style="color:#1565C0">{tel}</a></td></tr>') if tel else ""
     email_row = (f'<tr><td style="color:#555;vertical-align:top">✉️</td>'
                  f'<td><a href="mailto:{email}" style="color:#1565C0;word-break:break-all">{email}</a></td></tr>') if email else ""
-    vzdal_typ  = row.get("vzdal_typ", "✈️")
     vzdal_row = (f'<tr><td colspan="2" style="padding-top:8px;color:#777;font-size:11px">'
-                 f'{vzdal_typ} {vzdal:.1f} km od zadaného PSČ</td></tr>') if vzdal is not None else ""
+                 f'✈️ {vzdal:.1f} km od zadaného PSČ</td></tr>') if vzdal is not None else ""
     adresa_row = (f'<tr><td style="padding-right:8px;color:#555;vertical-align:top">📍</td>'
                   f'<td>{adresa}</td></tr>') if adresa else ""
 
@@ -582,11 +524,9 @@ if not df.empty:
         column_config={
             "Strana":           st.column_config.TextColumn("Strana",  width="small"),
             "km":               st.column_config.NumberColumn("km",    format="%.1f km", width="small"),
-            "typ":              st.column_config.TextColumn("",        width="small"),
             "Adresa kanceláře": st.column_config.TextColumn("Adresa",  width="large"),
             "E-mail":           st.column_config.TextColumn("E-mail",  width="medium"),
         }
     )
 else:
     st.info("Žádné kanceláře neodpovídají filtrům.")
-
