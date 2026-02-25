@@ -298,47 +298,47 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * 2 * asin(sqrt(a))
 
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400 * 30, show_spinner=False)
+def load_psc_db() -> dict:
+    """
+    Stáhne databázi PSČ → GPS z GeoNames (CZ.zip, ~200 KB, volně dostupné).
+    Vrátí slovník {psc_bez_mezery: (lat, lon)}.
+    """
+    url = "https://download.geonames.org/export/zip/CZ.zip"
+    db = {}
+    try:
+        r = requests.get(url, headers={"User-Agent": "PSP-kancelare-mapa/1.0"}, timeout=15)
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        # Soubor uvnitř se jmenuje CZ.txt, TSV formát
+        with zf.open("CZ.txt") as f:
+            for line in f:
+                parts = line.decode("utf-8").strip().split("\t")
+                if len(parts) >= 11:
+                    psc  = parts[1].replace(" ", "")
+                    try:
+                        lat = float(parts[9])
+                        lon = float(parts[10])
+                        db[psc] = (lat, lon)
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+    return db
+
+
 def psc_to_coords(psc: str):
     psc_clean = re.sub(r"\s", "", psc).strip()
-
-    # 1. pokus: api.zippopotam.us – spolehlivé, bez rate limitu
-    try:
-        url = f"https://api.zippopotam.us/cz/{psc_clean}"
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            place = data["places"][0]
-            return float(place["latitude"]), float(place["longitude"])
-    except Exception:
-        pass
-
-    # 2. pokus: Nominatim s lepším User-Agent
-    try:
-        url = (f"https://nominatim.openstreetmap.org/search"
-               f"?postalcode={psc_clean}&country=CZ&format=json&limit=1&addressdetails=0")
-        r = requests.get(url, headers={
-            "User-Agent": f"PSP-kancelare-mapa/1.0 (streamlit; {psc_clean})"
-        }, timeout=10)
-        data = r.json()
-        if data:
-            return float(data[0]["lat"]), float(data[0]["lon"])
-    except Exception:
-        pass
-
-    # 3. pokus: photon.komoot.io – další OSM geocoder
-    try:
-        url = (f"https://photon.komoot.io/api/"
-               f"?q={psc_clean}&lang=cs&limit=1&bbox=12,48,19,51.5")
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        feats = data.get("features", [])
-        if feats:
-            lon, lat = feats[0]["geometry"]["coordinates"]
-            return float(lat), float(lon)
-    except Exception:
-        pass
-
+    db = load_psc_db()
+    if psc_clean in db:
+        return db[psc_clean]
+    # Fallback: zkus první 3 cifry (přibližná poloha okresu)
+    if len(psc_clean) >= 3:
+        prefix = psc_clean[:3]
+        matches = [(k, v) for k, v in db.items() if k.startswith(prefix)]
+        if matches:
+            lats = [v[0] for _, v in matches]
+            lons = [v[1] for _, v in matches]
+            return sum(lats)/len(lats), sum(lons)/len(lons)
     return None, None
 
 
