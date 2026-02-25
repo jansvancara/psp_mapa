@@ -301,15 +301,44 @@ def haversine(lat1, lon1, lat2, lon2):
 @st.cache_data(ttl=86400)
 def psc_to_coords(psc: str):
     psc_clean = re.sub(r"\s", "", psc).strip()
-    url = (f"https://nominatim.openstreetmap.org/search"
-           f"?postalcode={psc_clean}&country=CZ&format=json&limit=1")
+
+    # 1. pokus: api.zippopotam.us – spolehlivé, bez rate limitu
     try:
-        r = requests.get(url, headers={"User-Agent": "PSP-kancelare-app/1.0"}, timeout=10)
+        url = f"https://api.zippopotam.us/cz/{psc_clean}"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            place = data["places"][0]
+            return float(place["latitude"]), float(place["longitude"])
+    except Exception:
+        pass
+
+    # 2. pokus: Nominatim s lepším User-Agent
+    try:
+        url = (f"https://nominatim.openstreetmap.org/search"
+               f"?postalcode={psc_clean}&country=CZ&format=json&limit=1&addressdetails=0")
+        r = requests.get(url, headers={
+            "User-Agent": f"PSP-kancelare-mapa/1.0 (streamlit; {psc_clean})"
+        }, timeout=10)
         data = r.json()
         if data:
             return float(data[0]["lat"]), float(data[0]["lon"])
     except Exception:
         pass
+
+    # 3. pokus: photon.komoot.io – další OSM geocoder
+    try:
+        url = (f"https://photon.komoot.io/api/"
+               f"?q={psc_clean}&lang=cs&limit=1&bbox=12,48,19,51.5")
+        r = requests.get(url, timeout=10)
+        data = r.json()
+        feats = data.get("features", [])
+        if feats:
+            lon, lat = feats[0]["geometry"]["coordinates"]
+            return float(lat), float(lon)
+    except Exception:
+        pass
+
     return None, None
 
 
@@ -560,3 +589,4 @@ if not df.empty:
     )
 else:
     st.info("Žádné kanceláře neodpovídají filtrům.")
+
