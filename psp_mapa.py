@@ -259,8 +259,8 @@ def load_data():
     result["telefon_k"] = result.apply(build_telefon, axis=1)
     result["email_k"]   = result.apply(build_email, axis=1)
 
-    # Přidej web z poslanec pro případ že telefon chybí
-    # Zkontroluj kolik záznamů má kontakty
+    result["telefon_k"] = result["telefon_k"].astype(str).replace("nan", "")
+    result["email_k"]   = result["email_k"].astype(str).replace("nan", "")
     n_tel   = (result["telefon_k"].str.len() > 0).sum()
     n_email = (result["email_k"].str.len() > 0).sum()
 
